@@ -13,25 +13,27 @@ class Car(pygame.sprite.Sprite):
         self.original_image = pygame.image.load(os.path.join("Assets", "car.png"))
         self.image = self.original_image
         self.rect = self.image.get_rect(center=(490,820)) #ONCE GAME IS DONE DIVIDE BY 2 TO SCALE FOR MY SCREEN
-        self.drive_state = False
         self.vel_vector = pygame.math.Vector2(0.8, 0)
         self.angle = 0
         self.rotation_vel = 5
         self.direction = 0
         self.alive = True
+        self.radars=[]
+
 
 
     def update(self):
         #drive and rotate
+        self.radars.clear()
         self.drive()
         self.rotate()
         for radar_angle in (-60,-30, 0, 30, 60):
             self.radar(radar_angle)
         self.collision()
+        self.data()
 
-    def drive(self):
-        if self.drive_state:
-            self.rect.center += self.vel_vector *6
+    def drive(self):    
+        self.rect.center += self.vel_vector *6
     
     def collision(self):
         length = 40
@@ -47,7 +49,6 @@ class Car(pygame.sprite.Sprite):
         # Draw collision points
         pygame.draw.circle(SCREEN,(0,255,255,0), collision_point_left, 4)
         pygame.draw.circle(SCREEN,(0,255,255,0), collision_point_right, 4)
-
 
         
     def rotate(self):
@@ -75,9 +76,33 @@ class Car(pygame.sprite.Sprite):
         pygame.draw.line(SCREEN, (255, 255, 255, 255), self.rect.center, (x, y), 1)
         pygame.draw.circle(SCREEN, (0, 255, 0, 0), (x, y), 3)
 
-cars = pygame.sprite.GroupSingle(Car()) #add instance of Car to the group
+        dist = int(math.sqrt(math.pow(self.rect.center[0]-x,2)+math.pow(self.rect.center[1]-y,2)))
+        self.radars.append([radar_angle,dist])
 
-def eval_genome():
+    def data(self):
+        input = [0,0,0,0,0]
+        for i,radar in enumerate(self.radars):
+            input[i] = int(radar[1])
+        return input
+    
+def remove(index):
+    cars.pop(index)
+    ge.pop(index)
+    nets.pop(index)
+
+def eval_genomes(genomes, config):
+    global cars, ge, nets
+
+    cars= []
+    ge = []
+    nets = []
+
+    for genome_id, genome in genomes:
+        cars.append(pygame.sprite.GroupSingle(Car()))
+        ge.append(genome)
+        net = neat.nn.FeedForwardNetwork.create(genome, config)
+        nets.append(net)
+        genome.fitness = 0
 
     run=True
     while run:
@@ -89,6 +114,25 @@ def eval_genome():
     
         SCREEN.blit(TRACK, (0,0))
 
+        if len(cars) == 0:
+            break
+
+        for i, car in enumerate(cars):
+            ge[i].fitness +=1
+            if not car.sprite.alive:
+                remove(i)
+        
+        for i, car in enumerate(cars):
+            print(nets[i])
+            output = nets[i].activate(car.sprite.data())
+            if output[0] >0.7:
+                car.sprite.direction = 1
+            if output[1] > 0.7:
+                car.sprite.direction = -1
+            if output[0] <= 0.7 and output[1] <= 0.7:
+                car.sprite.direction = 0
+
+        '''
         #user input
         user_input = pygame.key.get_pressed()
         if sum(pygame.key.get_pressed()) <=1:
@@ -103,11 +147,34 @@ def eval_genome():
             cars.sprite.direction = 1
         if user_input[pygame.K_LEFT]:
             cars.sprite.direction = -1
-
+        '''
         # update
-        cars.draw(SCREEN)
-        cars.update()
+        for car in cars:
+            car.draw(SCREEN)
+            car.update()
         pygame.display.update()
 
+#eval_genome()
+# Setup NEAT network
+def run(config_path):
+    global pop
+    config = neat.config.Config(
+        neat.DefaultGenome,
+        neat.DefaultReproduction,
+        neat.DefaultSpeciesSet,
+        neat.DefaultStagnation,
+        config_path
+    )
 
-eval_genome()
+    pop = neat.Population(config)
+
+    pop.add_reporter(neat.StdOutReporter(True))
+    stats = neat.StatisticsReporter()
+    pop.add_reporter(stats)
+
+    pop.run(eval_genomes, 50)
+
+if __name__ == '__main__':
+    local_dir = os.path.dirname(__file__)
+    config_path = os.path.join(local_dir, 'config.txt')
+    run(config_path)
